@@ -6,7 +6,7 @@
 
 用法（二选一）：
   1. 项目根目录执行 .\start.ps1
-  2. 命令行：& "e:\Pro2\audio-demucs\python-audio-separator\.venv\Scripts\python.exe" separator_webui.py
+  2. 命令行：& "E:\AI\audio-demucs\python-audio-separator\.venv\Scripts\python.exe" separator_webui.py
 """
 
 import os
@@ -27,7 +27,7 @@ from audio_separator.separator import Separator
 # 路径配置（绝对路径，摆脱对运行目录的依赖）
 # ---------------------------------------------------------------------------
 MODEL_DIR = r"c:\Users\wang\audio-separator-models"
-FFMPEG_BIN = r"e:\Pro2\audio-demucs\python-audio-separator\ffmpeg\bin"
+FFMPEG_BIN = r"E:\AI\audio-demucs\python-audio-separator\ffmpeg\bin"
 FFMPEG = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 MODEL_FILE = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 MODEL_URL = ("https://gh-proxy.com/https://github.com/TRvlvr/model_repo/releases/"
