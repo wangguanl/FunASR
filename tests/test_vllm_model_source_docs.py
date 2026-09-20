@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 
 import pytest
 
@@ -7,8 +8,47 @@ ROOT = Path(__file__).resolve().parents[1]
 VLLM_GUIDES = [
     "docs/vllm_guide.md",
     "docs/vllm_guide_zh.md",
-    "docs/vllm_guide_zh_v2.md",
 ]
+
+
+@pytest.mark.parametrize("suffix", ["", "_zh", "_ja", "_ko"])
+def test_model_selection_distinguishes_checkpoint_and_service_paths(suffix):
+    text = (ROOT / f"docs/model_selection{suffix}.md").read_text()
+    language_suffix = "_zh" if suffix == "_zh" else ""
+    for target in (f"vllm_guide{language_suffix}.md",
+                   f"vllm_official_native_validation{language_suffix}.md",
+                   "vllm_native_funasr_validation.md"):
+        assert f"](./{target})" in text
+        assert (ROOT / "docs" / target).is_file()
+    for marker in ("AutoModelVLLM", "FunAudioLLM/Fun-ASR-Nano-2512-vllm",
+                   "/v1/audio/transcriptions", "/v1/realtime", "2026-08-13"):
+        assert marker in text
+    if suffix == "_zh":
+        assert "](./vllm_guide.md)" not in text
+
+
+@pytest.mark.parametrize("suffix", ["", "_zh", "_ja", "_ko"])
+def test_model_selection_moss_alias_matches_real_service_configuration(suffix):
+    tree = ast.parse((ROOT / "examples/openai_api/server.py").read_text())
+    config = next(node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                  and any(isinstance(t, ast.Name) and t.id == "MODEL_CONFIGS" for t in node.targets))
+    moss = next(value for key, value in zip(config.keys, config.values)
+                if isinstance(key, ast.Constant) and key.value == "moss-transcribe-diarize")
+    model = next(ast.literal_eval(value) for key, value in zip(moss.keys, moss.values)
+                 if ast.literal_eval(key) == "model")
+    assert model == "OpenMOSS-Team/MOSS-Transcribe-Diarize"
+    text = (ROOT / f"docs/model_selection{suffix}.md").read_text()
+    assert "**`moss-transcribe-diarize`**" in text
+    assert f"`{model}`" in text
+    assert "verbose_json" in text
+
+
+def test_documentation_hub_keeps_official_and_historical_native_entries_separate():
+    text = (ROOT / "docs/README.md").read_text()
+    for target in ("vllm_official_native_validation.md", "vllm_official_native_validation_zh.md",
+                   "vllm_native_funasr_validation.md"):
+        assert f"]({target})" in text
+    assert "2026-08-13" in text
 
 
 @pytest.mark.parametrize("relpath", VLLM_GUIDES)
@@ -31,20 +71,34 @@ def test_vllm_guides_distinguish_official_and_native_model_paths(relpath):
         assert marker in text, f"{relpath} is missing {marker}"
 
 
-def test_v2_guide_keeps_native_vllm_and_funasr_realtime_paths_separate():
-    text = (ROOT / "docs/vllm_guide_zh_v2.md").read_text(encoding="utf-8")
-
-    required_markers = [
-        "FunAudioLLM/Fun-ASR-Nano-2512-vllm",
-        "vllm serve FunAudioLLM/Fun-ASR-Nano-2512-vllm --port 8000",
-        "serve_realtime_ws.py",
-        "realtime speech-to-text",
-        "没有可用的实时转写会话",
-        "不是稳定的 API 契约",
-    ]
+@pytest.mark.parametrize(
+    ("relpath", "required_markers"),
+    [
+        ("docs/vllm_guide_zh.md", [
+            "FunAudioLLM/Fun-ASR-Nano-2512-vllm",
+            "vllm_official_native_validation_zh.md",
+            "serve_realtime_ws.py",
+            "VAD、partial",
+            "不会注册 `/v1/realtime`",
+            "不是稳定的 API 契约",
+        ]),
+        ("docs/vllm_guide.md", [
+            "FunAudioLLM/Fun-ASR-Nano-2512-vllm",
+            "vllm_official_native_validation.md",
+            "serve_realtime_ws.py",
+            "VAD, partial",
+            "they do not register",
+            "not a stable API contract",
+        ]),
+    ],
+)
+def test_primary_guide_keeps_native_vllm_and_funasr_realtime_paths_separate(
+    relpath, required_markers
+):
+    text = (ROOT / relpath).read_text(encoding="utf-8")
 
     for marker in required_markers:
-        assert marker in text, f"docs/vllm_guide_zh_v2.md is missing {marker}"
+        assert marker in text, f"{relpath} is missing {marker}"
 
 
 @pytest.mark.parametrize(

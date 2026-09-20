@@ -196,6 +196,41 @@ def test_openmaic_ecosystem_entry_is_merged_attributed_and_bounded():
         assert 'https://github.com/THU-MAIC/OpenMAIC/pull/1044' in text
 
 
+def test_langflow_entries_distinguish_release_branch_from_published_packages():
+    revision = '8a56d1b1c93c30661984f3626e8969e41cfcf10a'
+    source = (
+        f'https://github.com/langflow-ai/langflow/blob/{revision}/'
+        'src/bundles/lfx-bundles/src/lfx_bundles/funasr/funasr_transcription.py'
+    )
+    api_guide = 'https://github.com/modelscope/FunASR/tree/main/examples/openai_api'
+    for language in ('en', 'zh'):
+        page = LEGACY / ('en/ecosystem.html' if language == 'en' else 'ecosystem.html')
+        soup = BeautifulSoup(page.read_text(encoding='utf-8'), 'html.parser')
+        cards = [
+            card for card in soup.select('.card')
+            if card.select_one('.card-title').get_text(' ', strip=True) == 'Langflow'
+        ]
+        assert len(cards) == 1
+        card = cards[0]
+        text = card.get_text(' ', strip=True)
+        links = {link.get('href') for link in card.select('a[href]')}
+        assert {source, api_guide} <= links
+        assert 'release-1.13.0' in text
+        assert '1.12.1' in text and '1.1.23' in text
+        assert '2026-09-10' in text
+        assert ('尚未包含' in text) if language == 'zh' else ('not included' in text)
+        assert 'SSRF' in text
+
+        name = 'community_projects.md' if language == 'en' else 'community_projects_zh.md'
+        document = (SITE_ROOT.parents[1] / 'docs' / name).read_text(encoding='utf-8')
+        row = next(line for line in document.splitlines() if '[Langflow](' in line)
+        assert source in row and api_guide in row
+        assert 'release-1.13.0' in row
+        assert '1.12.1' in row and '1.1.23' in row
+        assert ('尚未包含' in row) if language == 'zh' else ('not included' in row)
+        assert 'https://github.com/langflow-ai/langflow/blob/main/' not in row
+
+
 def test_recent_merged_ecosystem_integrations_are_bilingual_and_attributed():
     pages = {
         'zh': LEGACY / 'ecosystem.html',
@@ -298,6 +333,59 @@ def test_v140_release_pages_are_bilingual_indexed_and_precise():
     en_index = (LEGACY / 'en' / 'blog' / 'index.html').read_text(encoding='utf-8')
     sitemap = (LEGACY / 'sitemap.xml').read_text(encoding='utf-8')
 
+    assert f'/blog/{slug}' in zh_index
+    assert f'/en/blog/{slug}' in en_index
+    assert f'https://www.funasr.com/blog/{slug}' in sitemap
+    assert f'https://www.funasr.com/en/blog/{slug}' in sitemap
+
+
+def test_v1416_release_pages_are_bilingual_indexed_and_precise():
+    slug = 'funasr-v1-4-16-submodel-device-release.html'
+    pages = {
+        'zh': LEGACY / 'blog' / slug,
+        'en': LEGACY / 'en' / 'blog' / slug,
+    }
+    release_assets = {
+        'SHA256SUMS',
+        'funasr-1.4.16-py3-none-any.whl',
+        'funasr-1.4.16.tar.gz',
+        'funasr-llamacpp-linux-arm64.tar.gz',
+        'funasr-llamacpp-linux-x64-avx2.tar.gz',
+        'funasr-llamacpp-linux-x64-vulkan.tar.gz',
+        'funasr-llamacpp-linux-x64.tar.gz',
+        'funasr-llamacpp-macos-arm64.tar.gz',
+        'funasr-llamacpp-windows-x64-avx2.zip',
+        'funasr-llamacpp-windows-x64-cuda.zip',
+        'funasr-llamacpp-windows-x64-vulkan.zip',
+        'funasr-llamacpp-windows-x64.zip',
+    }
+
+    for language, path in pages.items():
+        text = path.read_text(encoding='utf-8')
+        soup = BeautifulSoup(text, 'html.parser')
+        assert 'funasr==1.4.16' in text
+        assert '904cd18681b8083de5e1039bd0ecebc4f49ede60' in text
+        assert 'f95943f6a8111349a1b08907363b048a49e9cb9caa1e3afd8c92970d08bf450d' in text
+        assert '1e2f8e3887fbc4b164cce40f73bf1324907da6ab59d1e8bf2add827f534c69e7' in text
+        assert 'https://pypi.org/project/funasr/1.4.16/' in text
+        assert 'https://github.com/modelscope/FunASR/releases/tag/v1.4.16' in text
+        assert 'submodel' in text.lower()
+        assert 'blackwell' not in text.lower()
+        asset_codes = {
+            code.get_text(strip=True)
+            for code in soup.select('code')
+            if code.get_text(strip=True).startswith(('funasr-', 'SHA256SUMS'))
+        }
+        assert asset_codes == release_assets
+        expected_route = f'/{"" if language == "zh" else "en/"}blog/{slug}'
+        assert soup.select_one('link[rel="canonical"]')['href'].endswith(expected_route)
+        peer_route = f'/{"en/" if language == "zh" else ""}blog/{slug}'
+        peer_language = 'en' if language == 'zh' else 'zh'
+        assert soup.select_one(f'link[rel="alternate"][hreflang="{peer_language}"]')['href'].endswith(peer_route)
+
+    zh_index = (LEGACY / 'blog' / 'index.html').read_text(encoding='utf-8')
+    en_index = (LEGACY / 'en' / 'blog' / 'index.html').read_text(encoding='utf-8')
+    sitemap = (LEGACY / 'sitemap.xml').read_text(encoding='utf-8')
     assert f'/blog/{slug}' in zh_index
     assert f'/en/blog/{slug}' in en_index
     assert f'https://www.funasr.com/blog/{slug}' in sitemap
@@ -462,7 +550,7 @@ def test_funclip_v220_moss_release_pages_are_bilingual_indexed_and_verifiable():
         assert image
         metadata = json.loads(soup.select_one('script[type="application/ld+json"]').string)
         assert metadata['datePublished'] == '2026-08-31'
-        assert metadata['dateModified'] == '2026-08-31'
+        assert metadata['dateModified'] == '2026-09-09'
 
     zh_index = (LEGACY / 'blog' / 'index.html').read_text(encoding='utf-8')
     en_index = (LEGACY / 'en' / 'blog' / 'index.html').read_text(encoding='utf-8')

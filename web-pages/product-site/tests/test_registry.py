@@ -51,31 +51,41 @@ def test_vllm_contract_tracks_native_funasr_release_and_h100_validation(valid_re
 
     assert entry['maturity'] == 'community-verified'
     assert entry['tested'] == {
-        'funasr': 'Fun-ASR-Nano-2512 conversion@e718b36e',
-        'runtime': 'vLLM 0.27.1+cu129 / Torch 2.13.0+cu129',
-        'verified': '2026-08-13',
+        'funasr': 'Official model revision a4362c943d48951f98ca2a62181cc028970270c5; not a FunASR package version',
+        'runtime': 'vLLM 0.27.1+cu129 / Torch 2.13.0+cu129 / Transformers 5.15.0 / CUDA 12.9 / Python 3.12.3',
+        'verified': '2026-09-07',
     }
-    assert entry['models'] == ['Fun-ASR-Nano-2512 (community vLLM conversion)']
+    assert entry['models'] == ['FunAudioLLM/Fun-ASR-Nano-2512-vllm (official checkpoint)']
     install = '\n'.join(entry['commands']['install'])
-    assert 'vllm[audio]' in install
-    assert 'vllm-0.27.1%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl' in install
-    assert 'bf0d52faa2a51e7a01c6856a7a8a2d1307fd0ff711415d34168a67ffac0fa47b' in install
+    for marker in ('snapshot_download', 'FunAudioLLM/Fun-ASR-Nano-2512-vllm',
+                   'a4362c943d48951f98ca2a62181cc028970270c5', '5.15.0',
+                   '2.13.0+cu129', '0.27.1+cu129', 'local_dir=', 'cache_dir='):
+        assert marker in install
+    assert 'pip install' not in install
+    assert 'uv venv' not in install
     launch = '\n'.join(entry['commands']['launch'])
     for marker in (
-        'vllm serve allendou/Fun-ASR-Nano-2512-vllm',
-        '--revision e718b36e2578203ec893e9b488239225f8d668e2',
-        '--served-model-name fun-asr-nano',
+        '-m vllm.entrypoints.openai.api_server',
+        '--model "$MODEL_DIR"',
+        'HF_HUB_OFFLINE=1', 'TRANSFORMERS_OFFLINE=1',
+        '--host 127.0.0.1', '--port 57185',
+        '--served-model-name fun-asr-nano-official-a4362c94',
         '--dtype float32',
         '--gpu-memory-utilization 0.40',
+        '--enforce-eager',
     ):
         assert marker in launch
+    assert 'allendou' not in launch
     smoke = '\n'.join(entry['commands']['smoke'])
     assert '/v1/audio/transcriptions' in smoke
-    assert 'language=zh' in smoke
+    for language in ('zh', 'en', 'ja'):
+        assert f'language={language}' in smoke
     assert 'hotwords=开放时间,开放时间,开放时间' in smoke
     evidence_urls = {item['url'] for item in entry['evidence']}
     for url in (
         'https://github.com/modelscope/FunASR/blob/main/docs/vllm_native_funasr_validation.md',
+        'https://github.com/modelscope/FunASR/blob/main/docs/vllm_official_native_validation.md',
+        'https://github.com/modelscope/FunASR/blob/main/docs/vllm_official_native_validation_zh.md',
         'https://github.com/vllm-project/vllm/releases/tag/v0.27.1',
         'https://github.com/vllm-project/vllm/pull/33247',
         'https://github.com/vllm-project/vllm/pull/39674',
@@ -93,7 +103,12 @@ def test_vllm_contract_tracks_native_funasr_release_and_h100_validation(valid_re
     )
     limitation = entry['translations']['en']['primary_limitation'].lower()
     assert 'community-converted checkpoint' in limitation
-    assert 'official funasr split-engine' in limitation
+    assert 'official funaudiollm/fun-asr-nano-2512-vllm' in limitation
+    assert 'existing environment' in limitation
+    assert 'not a clean installation' in limitation
+    assert '2026-08-13' in limitation
+    assert 'v0.28.0' in limitation
+    assert 'https://github.com/vllm-project/vllm/pull/54944' in evidence_urls
 
 
 def test_moss_transcribe_diarize_contract_tracks_third_party_upstream(valid_registry):

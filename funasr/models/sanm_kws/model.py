@@ -286,11 +286,12 @@ class SanmKWS(torch.nn.Module):
             is_deted, det_keyword, det_score = detect_result[0], detect_result[1], detect_result[2]
 
             if is_deted:
-                self.writer["detect"][key[i]] = "detected " + det_keyword + " " + str(det_score)
                 det_info = "detected " + det_keyword + " " + str(det_score)
             else:
-                self.writer["detect"][key[i]] = "rejected"
                 det_info = "rejected"
+
+            if kwargs.get("output_dir") is not None:
+                self.writer["detect"][key[i]] = det_info
 
             result_i = {"key": key[i], "text": det_info}
             results.append(result_i)

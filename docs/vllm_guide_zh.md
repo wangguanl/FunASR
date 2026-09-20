@@ -14,7 +14,7 @@
 | Fun-ASR-Nano | **离线服务 (+SPK)** | dynamic | **46** | 8.19% | SPK 默认关闭 |
 | GLM-ASR-Nano | **vLLM batch** | fixed | **265** | 12.93% | 不支持长音频推理 |
 
-> vLLM 与 PyTorch CER 完全一致（差 < 0.2%），速度提升 16-340x。
+> 表中 Fun-ASR-Nano 的 batch 吞吐量比值为 `340 / 21 = 16.2`，前提是计时范围相同。`RTFx 340` 表示实时倍率，不是相对 PyTorch 加速 340 倍。CER 从 `8.06%` 变为 `8.20%`，相差 0.14 个百分点，并非完全相同。以上历史测量不保证其他硬件、话务和配置的性能或精度。
 
 ---
 
@@ -34,22 +34,26 @@
 
 ## 1. 安装与环境
 
-先安装 vLLM,按 NVIDIA 驱动的 CUDA 版本选对应版本;vLLM 会自动钉定并安装匹配的 torch / torchaudio / torchvision 三件套,所以不要自己装 torch/torchaudio——三者 ABI 锁死,必须是互相编译匹配的同一组(如 torch 2.10.0 ↔ torchaudio 2.10.0 ↔ torchvision 0.25.0),只能随 vLLM 一起来。
+本指南的 SDK、离线与 WebSocket 服务使用 **FunASR 拆分引擎**；不要把它的环境与下文原生 `vllm serve` 的验证环境混用。先选定 vLLM 版本和对应的 GPU wheel，再在独立虚拟环境中安装。`nvidia-smi` 的 CUDA 数字是驱动支持的上限，不是已安装的 CUDA runtime，也不能仅凭“12.x / 13.x”判断 wheel 是否兼容。
+
+下面以拆分引擎使用过的 `vllm==0.19.1` 和固定 FunASR 源码为起点。它固定了两个项目的版本，但**不是完整依赖锁文件，也不是所有 GPU 的干净安装验收**。GPU 构建与驱动要求请核对该版本的 [vLLM 安装文档](https://github.com/vllm-project/vllm/blob/v0.19.1/docs/getting_started/installation/gpu.md)。
 
 ```bash
-# 1) 先装 vLLM。按 `nvidia-smi` 显示的 CUDA 版本(驱动支持的最高 CUDA,不是 runtime CUDA)选版本,
-#    vLLM 会带来匹配的 torch/torchaudio/torchvision。
-#    驱动 CUDA 12.x  -> pip install vllm==0.19.1   (附带 torch 2.10 / cu128)
-#    驱动 CUDA >= 13 -> pip install vllm           (最新版;附带 torch 2.11 / cu130)
+python3.12 -m venv .venv-funasr-vllm
+source .venv-funasr-vllm/bin/activate
+python -m pip install "vllm==0.19.1"
 
-pip install "vllm==0.19.1"   # 按你的驱动 CUDA 调整;见下方说明
-
-# 2) 再装 FunASR 与其余依赖。
-pip install "funasr>=1.3.26"
-pip install safetensors tiktoken websockets regex fastapi uvicorn python-multipart
-
-cd /path/to/FunASR && pip install -e .
+# 服务脚本来自源码；在新的目录中安装，不覆盖已有工作区。
+git clone https://github.com/modelscope/FunASR.git FunASR-vllm
+cd FunASR-vllm
+git checkout --detach e42443f55971d0c804dcf2973fdd2e6e09bd5611
+python -m pip install -e .
+python -m pip install safetensors tiktoken websockets regex fastapi uvicorn python-multipart
+python -m pip check
+python -m pip freeze > environment.txt
 ```
+
+保存 GPU/驱动、Python、源码提交、模型 revision 和 `environment.txt`，再执行单请求、真实 WebSocket 及目标并发验收。`pip check` 只能检查声明的依赖关系，不证明 CUDA、音频算子或端到端服务可用。单纯安装 PyPI 包不会提供本指南引用的仓库服务脚本。
 
 ### 开始前先选定模型路径
 
@@ -86,14 +90,18 @@ model = AutoModelVLLM(
 
 #### B. vLLM 原生转写路径
 
-官方维护的 native checkpoint 是
+原生 `FunASRForConditionalGeneration` 使用完整 native checkpoint，不是路径 A 的 `model.pt` 拆分布局。官方维护的 native checkpoint 是
 [`FunAudioLLM/Fun-ASR-Nano-2512-vllm`](https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512-vllm)。
-vLLM 的支持模型表也把
+2026-09-07 审计时，v0.28.0 的模型注册表仍将
 [`allendou/Fun-ASR-Nano-2512-vllm`](https://huggingface.co/allendou/Fun-ASR-Nano-2512-vllm)
 列为原生 `FunASRForConditionalGeneration` 架构示例；后者是托管在官方
-FunAudioLLM 组织之外的社区转换完整 checkpoint。只有明确选择 vLLM 原生转写
+FunAudioLLM 组织之外的社区转换完整 checkpoint。main 与发布版不一定使用同一引用，
+下方官方验证记录区分了当时核查的版本，不能把不同版本的模型列表混为一谈。
+只有明确选择 vLLM 原生转写
 接口时，才应使用这两种 native checkpoint；不要用它们替换下文 FunASR
-`AutoModelVLLM` 示例中的官方 checkpoint。
+`AutoModelVLLM` 示例中的官方 checkpoint，也不要传给
+[serve_realtime_ws.py](../examples/industrial_data_pretraining/fun_asr_nano/serve_realtime_ws.py)；这些服务预期
+`model.pt`、`config.yaml` 与 `Qwen3-0.6B/`，不能用 native layout 替代。
 
 两种 native 路径都通过 `vllm serve` 提供非实时的请求/响应式转写
 `/v1/audio/transcriptions`，不会注册 `/v1/realtime`。vLLM 只为声明
@@ -102,9 +110,13 @@ realtime 任务的模型注册该 WebSocket 端点，`FunASRForConditionalGenera
 中。需要实时流式识别时，请使用 FunASR 流式 SDK 推理或流式 ASR 服务；路径 A 的
 `AutoModelVLLM` 示例同样属于离线推理。
 
-**硬件**：GPU ≥ 8GB VRAM，CUDA ≥ 11.8。推荐 16GB+。
+原生 HTTP API 不会自动获得 FunASR WebSocket 服务的 VAD、partial 预览、会话状态或 SPK 处理。WebSocket 握手的拒绝状态不是稳定的 API 契约，也不是模型支持实时转写的探测方法。
 
-为什么不要单独执行 `pip install torch torchaudio` ? torch/torchaudio/torchvision 的版本由 vLLM 版本决定—— 每个大版本会一起升级(见 vLLM 的 [requirements/cuda.txt](https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt))。手动安装会拉到最新 wheel,可能是为比你驱动更新的 CUDA runtime 编译的;PyTorch 会在 CUDA 初始化阶段、FunASR 启动前就报 The NVIDIA driver on your system is too old。让 vLLM 统一钉定这三件套即可避免。若仍遇到该错误,请安装其 CUDA 构建与 nvidia-smi 显示的 CUDA 匹配的 vLLM 版本(如 CUDA 12.x 用 vllm==0.19.1),或先升级 NVIDIA 驱动。
+官方权重的固定 revision、启动参数和实际输出见 [原生转写验证记录](./vllm_official_native_validation_zh.md)。该记录仅覆盖既有 H100 环境中的 vLLM 0.27.1 文件转写，不是干净安装、精度、容量、长音频、实时流式或说话人分离验收；不要把它的环境替换到上面的 0.19.1 拆分引擎命令中。
+
+**硬件**：以所选 vLLM GPU 构建的要求为准。显存需求还取决于模型、精度、KV cache、batch 和会话数；本指南不承诺统一的最低显存或并发容量。
+
+不要在已验证环境中单独升级 `torch` 或 `torchaudio`。依赖约束随 vLLM 版本变化，不能概括成“始终自动安装相同版本的三件套”：例如 [0.19.1 的发布元数据](https://pypi.org/pypi/vllm/0.19.1/json)声明 `torch==2.10.0`、`torchaudio==2.10.0`、`torchvision==0.25.0`；[0.27.1 的发布元数据](https://pypi.org/pypi/vllm/0.27.1/json)声明 `torch==2.13.0`、`torchaudio==2.11.0`、`torchvision==0.28.0`。这些只是声明约束，不是安装成功或 ABI 兼容的证明。升级时新建环境并重新验收；遇到驱动过旧错误，应检查实际 wheel 的 CUDA 构建与驱动要求，而不是盲目安装最新版。
 
 ---
 
@@ -164,14 +176,14 @@ FunASR 的 vLLM 集成将 ASR 模型拆分为两部分独立运行：
 | 批处理 | 需手动 padding | Continuous Batching，自动调度 |
 | CUDA 优化 | 无 | CUDA Graph + 算子融合 |
 | 多卡并行 | 手动实现 | Tensor Parallel 一行配置 |
-| 吞吐量 | RTFx ~20 | **RTFx 340+** |
+| 已报告的 batch 吞吐量 | RTFx 21 | RTFx 340；范围见 Benchmark |
 
 ### 支持模型
 
-| 模型 | LLM 部分 | audio encoder | vLLM 加速 |
+| 模型 | LLM 部分 | audio encoder | 集成路径 |
 |------|---------|---------------|-----------|
-| **Fun-ASR-Nano** | Qwen3-0.6B | SenseVoice | ✓ 21.7x |
-| **GLM-ASR-Nano** | Llama-2B | Whisper-like | ✓ 7.6x |
+| **Fun-ASR-Nano** | Qwen3-0.6B | SenseVoice | 专用 split engine |
+| **GLM-ASR-Nano** | Llama-2B | Whisper-like | 专用 split engine |
 | LLMASR | Qwen/Vicuna | Whisper | ✓ |
 | Paraformer | 无 LLM | — | ✗ 非自回归 |
 | SenseVoice | 无 LLM | — | ✗ encoder-decoder |
@@ -255,7 +267,7 @@ FunASR 的 vLLM 集成将 ASR 模型拆分为两部分独立运行：
 | 批处理 | 需手动 padding 对齐 | Continuous Batching 自动调度 |
 | CUDA | 逐 sample 串行 | CUDA Graph + 算子融合 |
 | 多卡 | 需手动实现 | Tensor Parallel 一行配置 |
-| 结果 | RTFx ~20 | **RTFx 340+**（16倍加速） |
+| 已报告的 batch 结果 | RTFx 21 | RTFx 340；需匹配硬件和计时范围 |
 
 ### 通用接口（推荐）
 
@@ -289,12 +301,14 @@ engine = FunASRNanoVLLM.from_pretrained(
 )
 
 results = engine.generate(
-    inputs="wav.scp",  # 支持 scp/jsonl/文件列表
+    inputs=["audio1.wav", "audio2.wav"],  # 已存在的音频文件，不是清单文件
     hotwords=["开放时间"],
     language="中文",
     max_new_tokens=512,
 )
 ```
+
+直接引擎接收音频路径、音频路径列表或 16 kHz 波形数组/tensor，不展开 SCP/JSONL 清单。清单使用下方 [demo_vllm.py](../examples/industrial_data_pretraining/fun_asr_nano/demo_vllm.py)：SCP 每行为路径或 `key path`，JSONL 每行对象的 `source` 字段为音频路径。相对路径按进程工作目录解析。
 
 ### 命令行
 
@@ -447,24 +461,26 @@ CUDA_VISIBLE_DEVICES=0 python examples/industrial_data_pretraining/fun_asr_nano/
 
 **响应**：
 
+以下数值用于说明结构，不是实测结果。HTTP 时间戳和时长单位为秒；可选 `words`、`speaker` 字段取决于相应处理路径，见[服务与序列化实现](../examples/industrial_data_pretraining/fun_asr_nano/serve_vllm.py)。
+
 ```json
 {
-    "text": "完整识别文本",
+    "text": "你好",
     "segments": [
         {
-            "text": "段文本",
-            "start": 1.7,
-            "end": 14.8,
+            "text": "你好",
+            "start": 0.3,
+            "end": 1.2,
             "speaker": "SPK0",
             "words": [
-                {"word": "砸", "start": 2.02, "end": 2.08},
-                {"word": "了", "start": 2.26, "end": 2.32}
+                {"word": "你", "start": 0.3, "end": 0.6},
+                {"word": "好", "start": 0.6, "end": 1.2}
             ]
         }
     ],
-    "duration": 227.4,
-    "processing_time": 3.422,
-    "rtf": 0.015
+    "duration": 2.0,
+    "processing_time": 0.1,
+    "rtf": 0.05
 }
 ```
 
@@ -512,17 +528,22 @@ const result = await resp.json();
 
 **响应**（`verbose_json`）：
 
+以下为结构完整的示例响应；时间戳单位为秒，不是识别质量保证。
+
 ```json
 {
     "task": "transcribe",
     "language": "zh",
-    "duration": 5.17,
-    "text": "我一直没有照顾孩子，但是我想要抚养权。",
+    "duration": 2.0,
+    "text": "你好",
     "segments": [
         {
-            "id": 0, "start": 0.0, "end": 5.15,
-            "text": "我一直没有照顾孩子，但是我想要抚养权。",
-            "words": [{"word": "我", "start": 0.42, "end": 0.48}, ...]
+            "id": 0, "start": 0.3, "end": 1.2,
+            "text": "你好",
+            "words": [
+                {"word": "你", "start": 0.3, "end": 0.6},
+                {"word": "好", "start": 0.6, "end": 1.2}
+            ]
         }
     ]
 }
@@ -565,10 +586,12 @@ curl -X POST http://localhost:8899/v1/audio/transcriptions \
 
 **服务端 → 客户端**：
 
-```json
+下面每行是独立的 JSON WebSocket 消息，不是一个 JSON 文档。数值为示例，WebSocket 偏移单位为毫秒。
+
+```text
 {"event": "started"}
 {"event": "language_set", "language": "中文"}
-{"sentences": [{"text":"...","start":..,"end":..}], "is_final": true, "duration_ms": 5170}
+{"sentences": [{"text": "你好", "start": 300, "end": 1200}], "is_final": true, "duration_ms": 2000}
 {"event": "stopped"}
 ```
 
@@ -630,7 +653,7 @@ asyncio.run(offline_ws("audio.wav"))
 - 基于 VAD 端点自然分句
 - 确认段文字锁定不变，partial 实时更新
 - 可选流式说话人分配（`--enable-spk`）+ STOP 时全局重聚类
-- 首字延迟 ~480ms
+- partial 解码间隔是调度参数，不是首字延迟保证；需按实际话务测量端到端延迟
 
 ### 6.2 启动服务
 
@@ -692,10 +715,12 @@ CUDA_VISIBLE_DEVICES=0 python examples/industrial_data_pretraining/fun_asr_nano/
 
 **服务端 → 客户端**：
 
-```json
+示例消息序列，每个 JSON 对象对应一条 WebSocket 消息。偏移单位为毫秒，不是延迟实测记录。
+
+```text
 {"event": "started"}
-{"sentences": [{"text":"你好","start":300,"end":1200}], "partial": "世界", "is_final": false}
-{"sentences": [...], "is_final": true}
+{"sentences": [{"text": "你好", "start": 300, "end": 1200}], "partial": "世界", "is_final": false}
+{"sentences": [{"text": "你好", "start": 300, "end": 1200}, {"text": "世界", "start": 1500, "end": 2200}], "is_final": true}
 {"event": "stopped"}
 ```
 
@@ -808,7 +833,7 @@ Fun-ASR-Nano 的声学编码器（SenseVoice）是**全上下文、非流式**�
 - **先把单进程作为第一扩展单元。** 先用内置批处理压测单进程；只有当单进程达到实测 GPU、CPU 或尾延迟上限后，再增加进程或按 GPU 横向扩容。每个额外进程都会复制模型显存，也可能减少单进程内形成 batch 的机会。
 - **vLLM 收益取决于请求是否同时到达。** 真实轮流对话可能连接很多，但同时解码很少；把同一段连续独白同步回放给所有客户端，则会刻意形成大批次。发布结果时必须同时报告话务形态和批处理参数。
 - **可持续并发没有通用的“支持 N 路”数字。** 上限主要取决于同时说话数、静音比例、句长、partial 刷新间隔、说话人分离、batch 等待时间以及 GPU/CPU 能力。长时间不停顿的语音仍会重复编码临时窗口（见 §6.5），成本更高。请按自己的真实话务压测，不要把其他部署的连接数直接当成规格。
-- **L20 实测起点，不是全局默认值。** [#3528](https://github.com/modelscope/FunASR/issues/3528) 在单张 L20 上同步回放 47 秒连续语音、16 路客户端，并关闭 SPK 与客户端 ping；`--partial-window-sec 8 --decode-interval 2.0` 是该负载的最优组合：408 次解码请求、累计编码 3,072.1 秒音频、完成 p50 51.18 秒、输出滞后 4.5 秒、聚合实时率 14.2x、首词 1.31 秒。默认 15 秒窗口在这组 16 路负载上未完成。请只把 `8 / 2.0` 当作 L20 高并发初始配置，再按自己的首词、输出滞后、最终完成时间、请求数和累计编码量调优。
+- **L20 历史实测起点，不是容量承诺。** [#3528](https://github.com/modelscope/FunASR/issues/3528) 的一组历史测量在单张 L20 上同步回放 47 秒连续语音、16 路客户端，并关闭 SPK 与客户端 ping；`--partial-window-sec 8 --decode-interval 2.0` 是该组测量中表现最好的配置：408 次解码请求、累计编码 3,072.1 秒音频、完成 p50 51.18 秒、输出滞后 4.5 秒、聚合实时率 14.2x、首词 1.31 秒。该组测量当时采用的默认 15 秒窗口在 16 路负载上未完成；这不是当前源码的默认值（当前为 8 秒），也不能代替后续版本和不同 keepalive 配置的结果。请只把 `8 / 2.0` 当作该话务的调优起点，记录版本、窗口、keepalive、首词、输出滞后、最终完成时间、请求数和累计编码量。Git 安装成功不等于并发问题解决；该问题仍需独立验收。
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python examples/industrial_data_pretraining/fun_asr_nano/serve_realtime_ws.py \
@@ -819,28 +844,43 @@ CUDA_VISIBLE_DEVICES=0 python examples/industrial_data_pretraining/fun_asr_nano/
 
 ## 7. 动态 VAD
 
-fsmn-vad 默认启用动态静音阈值。离线和流式使用不同配置。
+动态静音属于 **VAD 阶段**，不是 ASR 解码参数。[FSMN-VAD](../funasr/models/fsmn_vad_streaming/model.py) 读取 `dynamic_silence` 和 `silence_schedule`；显式设置 `max_end_silence_time` 会关闭默认动态策略，除非另行覆盖。`AutoModelVLLM.generate(inputs, **kwargs)` 只转交给 ASR 引擎，不运行 VAD。
 
-| 累积时长 | 离线（保留长段 ≤60s） | 流式（平衡延迟） |
-|---------|-------------------|----------------|
-| ≤ 5s | 2000ms | 2000ms |
-| 5-10s | 2000ms | 1500ms |
-| 10-15s | 1000ms | 1000ms |
-| 15-20s | 1000ms | 800ms |
-| 20-30s | 800ms | 800ms |
-| 30-45s | 600ms | 400ms |
-| 45-60s | 200-400ms | 100ms |
-| > 60s | 100ms | 100ms |
+下表在边界时长采样 SDK 的 `DEFAULT_SILENCE_SCHEDULE` 与 `STREAMING_SILENCE_SCHEDULE` 常量。每个 schedule 选择首个大于或等于累积语音时长的上限对应项；这些是静音阈值，不是语音段长上限。
 
-离线倾向保留长段减少边界损失；流式更快收紧以降低延迟。
+| 累积语音时长采样点 | DEFAULT_SILENCE_SCHEDULE | STREAMING_SILENCE_SCHEDULE |
+| --- | --- | --- |
+| 5000 ms | 2000 ms | 2000 ms |
+| 10000 ms | 2000 ms | 1500 ms |
+| 15000 ms | 1000 ms | 1000 ms |
+| 20000 ms | 1000 ms | 800 ms |
+| 30000 ms | 800 ms | 800 ms |
+| 40000 ms | 600 ms | 400 ms |
+| 45000 ms | 400 ms | 400 ms |
+| 50000 ms | 400 ms | 100 ms |
+| 60000 ms | 200 ms | 100 ms |
+| 60001 ms | 100 ms | 100 ms |
+
+分块输入不会自动选择名称带 streaming 的常量。服务包装层可能使用独立策略，例如 [DynamicStreamingVAD](../funasr/models/fsmn_vad_streaming/dynamic_vad.py) 自己维护 schedule，并以 `dynamic_silence=False` 调用底层 VAD。不要把此 SDK 表格当作所有服务的配置。
 
 ### 自定义
 
 ```python
-model.generate(input="audio.wav", silence_schedule=[(5000,1500), (20000,800), (float('inf'),300)])
+from funasr import AutoModel
+
+vad = AutoModel(model="fsmn-vad", device="cpu", disable_update=True)
+segments = vad.generate(
+    input="audio.wav",
+    cache={},
+    dynamic_silence=True,
+    silence_schedule=[(5000, 1500), (20000, 800), (float("inf"), 300)],
+)
+print(segments[0]["value"])
 ```
 
-> GLM-ASR 不支持长段，使用时传 `dynamic_silence=False`。
+将 `audio.wav` 替换为实际录音。此独立 VAD 调用在 `value` 中返回毫秒单位的 `[start_ms, end_ms]` 区间，不返回转写文本。接入 ASR 时，按引擎要求加载并重采样音频，依据毫秒区间切片，再将波形列表传给 `model.generate(inputs=audio_segments)`；合并结果时保留原始偏移。本示例只演示分段，不会自动把 VAD 连接到 vLLM。
+
+> GLM-ASR 应先分段，并验证所选 checkpoint 的段长限制。需要固定静音阈值时，将 `dynamic_silence=False` 传给 **VAD** 调用，而不是 ASR 引擎；固定静音本身不限制最大段长。
 
 ---
 
@@ -863,17 +903,17 @@ model.generate(input="audio.wav", silence_schedule=[(5000,1500), (20000,800), (f
 完整文件 → 离线（高吞吐）。麦克风/直播 → 流式（低延迟）。
 
 **Q: GLM-ASR 用动态 VAD？**
-不支持长段推理，用 `dynamic_silence=False`。
+长录音应先分段，并针对所选 GLM checkpoint 验证段长。`dynamic_silence=False` 配置独立的 FSMN-VAD 阶段，不是 `AutoModelVLLM`；关闭动态静音本身不保证段长符合 ASR 限制。
 
 **Q: SPK 性能影响？**
-RTFx 102 → 46。CER 不变。默认关闭。
+表中离线服务关闭/开启 SPK 的 RTFx 分别为 102/46，CER 分别为 8.14%/8.19%。SPK 默认关闭；这组测量不代表其他部署的开销或精度。
 
 **Q: 二次开发入口？**
 离线：`serve_vllm.process_audio()` / `FunASRNanoVLLM.generate()`
 流式：`serve_realtime_ws.RealtimeASRSession`
 
 **Q: 首次慢？**
-vLLM 初始化 60-90s，之后即时。
+模型加载、KV cache 分配及可选 CUDA Graph 预热都会影响首次启动。请分别测量冷启动与预热后推理，二者均没有固定耗时或即时返回保证。
 
 **Q: Fun-ASR-Nano vLLM 使用 `dtype="fp16"` 时实际会怎样？**
 音频 frontend 与 adaptor 仍使用 FP16，但 FunASR 会让 Qwen3 decoder 使用 BF16，
@@ -886,7 +926,7 @@ vLLM 初始化 60-90s，之后即时。
 路径或解码参数和 upstream runner 不一致。改模型前先检查这些项：
 
 - 传给 vLLM 的 prompt embeddings 要显式转成 float32：
-  `EmbedsPrompt(prompt_embeds=input_embeds.float())`。
+  `EmbedsPrompt` 的 `prompt_embeds` 参数应接收 `input_embeds.float()`。
 - 使用 ASR 更合适的确定性解码。Fun-ASR-Nano vLLM 路径默认使用
   `temperature=0.0`、`top_p=1.0` 和 `skip_special_tokens=True`。在
   prompt-embeds 模式下，`repetition_penalty` 保持中性的 `1.0`，除非你走的是

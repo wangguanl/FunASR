@@ -3,10 +3,16 @@
 # ModelScope上的预训练模型
 
 ## 模型许可协议
-您可以在本协议的条件下自由使用、复制、修改和分享FunASR模型。在使用、复制、修改和分享FunASR模型时，您应当标明模型来源和作者信息。您应当在[FunASR软件]中保留相关模型的名称。完整的模型许可证请参见 [模型许可协议](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)
+FunASR 工具包采用 [MIT 软件许可](../LICENSE)，模型权重的许可需单独核对。
+使用或再分发前，请检查所选 checkpoint 的模型卡、许可文件及具体 revision。
+[FunASR 模型许可协议](../MODEL_LICENSE) 仅适用于发布条款明确采用它的模型，
+不能套用于本目录全部条目。OpenMOSS MOSS-Transcribe-Diarize 等第三方模型
+保留原作者归属和各自的模型许可。
 
 ## 模型用法
-模型用法参考[文档](../runtime/quick_start_zh.md)
+从[模型选型](../docs/model_selection_zh.md)、[Python SDK 入门](../docs/tutorial/README_zh.md)
+和[部署矩阵](../docs/deployment_matrix_zh.md)开始。MOSS 请使用
+[专门的适配器与服务指南](../docs/moss_transcribe_diarize_zh.md)，不要直接套用其他模型的流水线。
 
 ## 模型仓库
 这里我们提供了在不同数据集上预训练的模型。模型和数据集的详细信息可在 [ModelScope](https://www.modelscope.cn/models?page=1&tasks=auto-speech-recognition)中找到.

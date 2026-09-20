@@ -173,8 +173,8 @@
 
 <section class="section content-section" data-section="limitations">
   <div class="limitation-callout">
-    <p class="eyebrow">{{ '已知限制' if language == 'zh' else 'Known limitation' }}</p>
-    <h2>{{ copy.primary_limitation }}</h2>
+    <h2>{{ '已知限制' if language == 'zh' else 'Known limitations' }}</h2>
+    <p class="limitation-summary">{{ copy.primary_limitation }}</p>
     <p>{{ '公开基准仅用于复现起点，不替代目标业务负载测试。' if language == 'zh' else 'Public benchmarks are reproduction starting points, not substitutes for target-workload testing.' }}</p>
   </div>
 </section>

@@ -362,6 +362,48 @@ for (const viewport of [
   });
 }
 
+for (const language of ['zh', 'en']) {
+  test(`vLLM limitation preserves full revision and wraps on mobile (${language})`, async ({ page }, testInfo) => {
+    const revision = 'a4362c943d48951f98ca2a62181cc028970270c5';
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${language === 'en' ? '/en' : ''}/deploy/vllm.html`);
+    await page.evaluate(() => document.fonts.ready);
+
+    const heading = page.locator('.limitation-callout h2');
+    await expect(heading).toHaveText(language === 'en' ? 'Known limitations' : '已知限制');
+    const summary = page.locator('.limitation-callout p.limitation-summary');
+    await expect(summary).toContainText(revision);
+    await summary.scrollIntoViewIfNeeded();
+    const layout = await summary.evaluate((node, revision) => {
+      const text = node.firstChild!;
+      const start = text.textContent!.indexOf(revision);
+      const range = document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, start + revision.length);
+      const bounds = node.getBoundingClientRect();
+      return {
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        summaryOverflow: node.scrollWidth - node.clientWidth,
+        summaryLeft: bounds.left,
+        summaryRight: bounds.right,
+        fontSize: Number.parseFloat(getComputedStyle(node).fontSize),
+        revisionRects: [...range.getClientRects()].map(rect => ({ left: rect.left, right: rect.right, top: rect.top })),
+      };
+    }, revision);
+    await testInfo.attach('limitation-layout', { body: JSON.stringify(layout), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath(`vllm-limitation-${language}-mobile.png`), fullPage: true });
+    await page.locator('.limitation-callout').screenshot({ path: testInfo.outputPath(`vllm-limitation-${language}-callout.png`) });
+
+    expect(layout.overflow).toBeLessThanOrEqual(1);
+    expect(layout.summaryOverflow).toBeLessThanOrEqual(1);
+    expect(layout.fontSize).toBeLessThanOrEqual(18);
+    expect(new Set(layout.revisionRects.map(rect => Math.round(rect.top))).size).toBeGreaterThan(1);
+    expect(layout.revisionRects.every(rect =>
+      rect.left >= layout.summaryLeft - 1 && rect.right <= layout.summaryRight + 1,
+    )).toBe(true);
+  });
+}
+
 test('reduced motion disables smooth scrolling', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/en/');
@@ -391,22 +433,34 @@ for (const viewport of [
     ]) {
       await page.goto(release.index);
       await expect(
-        page.locator(`.launch-feature a[href="${release.article}"]`),
+        page.locator(`[data-blog-lead] a[href="${release.article}"]`),
       ).toBeVisible();
-      const history = page.locator('.previous-release .post-card');
-      await expect(history).toHaveCount(4);
+      await expect(page.locator(`[data-blog-selected] a[href="${release.index}meeting-transcript-acceptance.html"]`)).toBeVisible();
+      await page.locator(`[data-blog-more] a[href="${release.index}releases/"]`).click();
+      const history = page.locator('[data-blog-view="releases"] [data-blog-story]');
+      const historySlugs = [
+        'funasr-v1-4-14-portable-source-release.html',
+        'funasr-v1-4-5-pypi-llama-cpp-release.html',
+        'funasr-v1-4-3-pypi-release.html',
+        'funasr-v1-4-0-pypi-release.html',
+      ];
+      expect(await history.evaluateAll(cards => cards.map(card => card.getAttribute('href'))))
+        .toEqual(expect.arrayContaining(historySlugs.map(slug => `${release.index}${slug}`)));
+      await expect(page.locator('[data-blog-view="releases"] [data-blog-story]:not([data-blog-category="releases"])')).toHaveCount(0);
       await expect(
-        page.locator(`.previous-release a[href="${release.previous}"]`),
+        page.locator(`[data-blog-view="releases"] a[href="${release.previous}"]`),
       ).toBeVisible();
       const indexLayout = await history.evaluateAll((cards) => ({
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         rows: new Set(cards.map((card) => Math.round(card.getBoundingClientRect().top))).size,
       }));
       expect(indexLayout.overflow).toBeLessThanOrEqual(1);
-      expect(indexLayout.rows).toBe(viewport.name === 'mobile' ? 4 : 1);
+      expect(indexLayout.rows).toBe(await history.count());
 
       await page.goto(release.article);
-      await expect(page.locator('h1')).toContainText('FunClip v2.2.0');
+      await expect(page.locator('h1')).toHaveText(release.language === 'zh'
+        ? '把多人录音变成可剪辑的字幕' : 'Turn a conversation into editable subtitles');
+      await expect(page.locator('article')).toContainText('FunClip v2.2.0');
       await expect(page.getByText('OpenMOSS-Team/MOSS-Transcribe-Diarize', { exact: false }).first()).toBeVisible();
       await expect(page.getByText('/v1/audio/transcriptions', { exact: false }).first()).toBeVisible();
       await expect(page.locator('img[src="/img/funclip-v2-1-0-interface.jpg"]')).toBeVisible();
@@ -438,7 +492,7 @@ test('llama.cpp blog heading clears fixed navigation on mobile', async ({ page }
   await page.goto('/blog/funasr-llama-cpp-whisper-cpp-alternative.html');
 
   const layout = await page.evaluate(() => {
-    const navigation = document.querySelector<HTMLElement>('nav.nav');
+    const navigation = document.querySelector<HTMLElement>('.site-header');
     const heading = document.querySelector<HTMLElement>('h1');
     return {
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -463,7 +517,7 @@ test('legacy comparison pages keep accurate claims and fit mobile', async ({ pag
     const audit = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       text: document.body.innerText,
-      trackedGitHub: document.querySelector('.nav-btn')?.getAttribute('href'),
+      trackedGitHub: document.querySelector('.site-header a[aria-label="GitHub"]')?.getAttribute('href'),
     }));
 
     expect(audit.overflow).toBeLessThanOrEqual(1);

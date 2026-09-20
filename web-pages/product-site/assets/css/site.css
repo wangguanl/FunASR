@@ -1004,6 +1004,14 @@ td a {
   filter: brightness(0) invert(1);
 }
 
+.copy-button:hover,
+.copy-button:focus-visible,
+.command-copy:hover,
+.command-copy:focus-visible {
+  border-color: #718096;
+  background: #354357;
+}
+
 .security-list {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px;
@@ -1024,6 +1032,7 @@ td a {
 .limitation-callout h2 {
   max-width: 940px;
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: 28px;
   line-height: 1.35;
 }
@@ -1031,6 +1040,14 @@ td a {
 .limitation-callout > p:last-child {
   margin: 14px 0 0;
   color: var(--muted);
+}
+
+.limitation-summary {
+  max-width: 78ch;
+  margin: 14px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  line-height: 1.65;
 }
 
 .evidence-list {

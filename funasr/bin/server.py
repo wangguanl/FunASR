@@ -1,14 +1,18 @@
 """
 FunASR Server — OpenAI-compatible speech recognition API.
 
+Defaults: host=0.0.0.0, port=8000, device=cuda, model=auto.
+Auto selection: cuda* -> fun-asr-nano; other devices -> sensevoice.
+No API-key authentication is provided; keep local demos on loopback.
+
 Usage:
-    funasr-server                          # default: sensevoice on cuda:0, port 8000
-    funasr-server --device cpu --port 9000
-    funasr-server --model paraformer
-    funasr-server --model moss-transcribe-diarize --device cuda:0
-    funasr-server --model-path /path/to/local/model
-    funasr-server --model-path username/paraformer --hub hf
-    funasr-server --cors-origin http://localhost:3000
+    funasr-server --host 127.0.0.1 --model sensevoice --device cpu
+    funasr-server --host 127.0.0.1 --device cpu --port 9000
+    funasr-server --host 127.0.0.1 --model paraformer
+    funasr-server --host 127.0.0.1 --model moss-transcribe-diarize --device cuda:0
+    funasr-server --host 127.0.0.1 --model-path /path/to/local/model
+    funasr-server --host 127.0.0.1 --model-path username/paraformer --hub hf
+    funasr-server --host 127.0.0.1 --cors-origin http://localhost:3000
 """
 
 import argparse
@@ -28,20 +32,29 @@ def build_parser():
         description="FunASR OpenAI-Compatible API Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  funasr-server                          # Start with SenseVoice on GPU
-  funasr-server --device cpu             # Start on CPU
-  funasr-server --model paraformer       # Use Paraformer model
-  funasr-server --model moss-transcribe-diarize --device cuda:0
-  funasr-server --port 9000             # Custom port
-  funasr-server --model-path /path/to/local/model  # Use local model
-  funasr-server --model-path username/model --hub hf  # Use HuggingFace model
-  funasr-server --cors-origin http://localhost:3000  # Allow one browser origin
+Defaults: host=0.0.0.0, port=8000, device=cuda, model=auto.
+Auto selection: cuda* -> fun-asr-nano; other devices -> sensevoice.
+For a local example, use the explicit SenseVoice CPU command below.
+Other model/device examples require their own prepared environment.
 
-Then use with OpenAI SDK:
+Examples:
+  funasr-server --host 127.0.0.1 --model sensevoice --device cpu
+  funasr-server --host 127.0.0.1 --model fun-asr-nano --device cuda  # Inspect backend logs
+  funasr-server --host 127.0.0.1 --model paraformer
+  funasr-server --host 127.0.0.1 --model moss-transcribe-diarize --device cuda:0
+  funasr-server --host 127.0.0.1 --port 9000  # Custom port
+  funasr-server --host 127.0.0.1 --model-path /path/to/local/model
+  funasr-server --host 127.0.0.1 --model-path username/model --hub hf
+  funasr-server --host 127.0.0.1 --cors-origin http://localhost:3000
+
+For the local SenseVoice example, in a second terminal:
+  python -m pip install openai
+
+Then run Python (api_key is a placeholder, not authentication):
   from openai import OpenAI
-  client = OpenAI(base_url="http://localhost:8000/v1", api_key="x")
-  result = client.audio.transcriptions.create(model="sensevoice", file=open("a.wav","rb"))
+  client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="not-needed")
+  with open("a.wav", "rb") as audio:
+      result = client.audio.transcriptions.create(model="sensevoice", file=audio)
 """,
     )
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
