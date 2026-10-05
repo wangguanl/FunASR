@@ -53,7 +53,7 @@ The wrapper accepts `**kwargs`, not a universally validated parameter schema. A 
 
 ### Place submodels on separate devices
 
-> **Version requirement:** This placement contract is not included in the PyPI 1.4.15 package. Use a source checkout containing [PR #3706](https://github.com/modelscope/FunASR/pull/3706), merged at [4d8e087](https://github.com/modelscope/FunASR/commit/4d8e08748c9d7cc10f3e3a01f5f4b927a8948699), and follow the [source installation instructions](installation/installation.md). Record the checkout commit and imported `funasr.__file__`; a development checkout can still report version `1.4.15`.
+> **Version requirement:** This placement contract is included in [PyPI 1.4.16](https://pypi.org/project/funasr/1.4.16/), but not in 1.4.15. Install the verified release with `python -m pip install "funasr==1.4.16"`; see the [installation guide](installation/installation.md) for dependencies. For a source installation, use a checkout containing [PR #3706](https://github.com/modelscope/FunASR/pull/3706) (merge commit [4d8e087](https://github.com/modelscope/FunASR/commit/4d8e08748c9d7cc10f3e3a01f5f4b927a8948699)). Record the installed version and imported `funasr.__file__`, plus the commit for source checkouts; a source checkout's version string alone does not establish which fixes it contains.
 
 For example, keep FSMN VAD and punctuation on CPU while ASR uses Apple Silicon MPS:
 
@@ -104,7 +104,15 @@ for result in results:
 
 `batch_size=1` processes a list serially through direct inference; raise it only for a model that supports batching and after measuring memory use. `batch_size_s` has a different meaning and only controls the wrapper's VAD path. VAD segmentation is not incremental microphone streaming, and it does not guarantee unlimited recording length or bounded total memory.
 
-Use a one-dimensional mono float32 waveform with a known sample rate. For models using the common audio loader, `fs` in `generate()` describes the array's source sample rate (fallback 16000); the model frontend supplies the target rate. Do not pass a stereo matrix or a list of numbers and assume it will be treated as one waveform: a Python list is normally a list of inputs. File decoding depends on the installed audio backends. Top-level bytes are handled by `load_bytes`: recognized containers are decoded/resampled to 16 kHz, otherwise bytes are interpreted as int16 PCM without sample-rate metadata. Prefer a decoded array with an explicit rate for ambiguous inputs. See [audio loading](../funasr/utils/load_utils.py) and [byte-input tests](../tests/test_load_audio_bytes.py).
+Use a one-dimensional mono float32 waveform with a known sample rate. For models using the common audio loader, `fs` in `generate()` describes the array's source sample rate (fallback 16000); the model frontend supplies the target rate. Do not pass a stereo matrix or a list of numbers and assume it will be treated as one waveform: a Python list is normally a list of inputs. File decoding depends on the installed audio backends. With the default `input_format="auto"`, top-level bytes are handled by `load_bytes`: recognized containers are decoded/resampled to 16 kHz, otherwise bytes are interpreted as int16 PCM without sample-rate metadata. Prefer a decoded array with an explicit rate for ambiguous inputs. See [audio loading](../funasr/utils/load_utils.py) and [byte-input tests](../tests/test_load_audio_bytes.py).
+
+For known **mono signed 16-bit little-endian raw PCM**, explicitly bypass format detection:
+
+```python
+result = model.generate(input=pcm_bytes, input_format="pcm_s16le", fs=16000)
+```
+
+This option also applies to byte strings in a batch and to the VAD preprocessing path. It normalizes samples to float32 without invoking a container decoder; raw bytes can otherwise accidentally resemble a file header. It does not resample at byte-conversion time: use the actual source sample rate in `fs`. Do not select this format for WAV/MP3 file bytes, float PCM, other bit depths, big-endian samples, or interleaved stereo. A partial two-byte sample raises `ValueError`; assemble complete samples in the receiving layer. Streaming callers must still preserve their per-session `cache`, chunk settings, and final-chunk handling. This opt-in path avoids ambiguous probing, but does not diagnose every source of inference delays.
 
 `prepare_data_iterator` also accepts manifests. A `.scp` line can be `utterance_id /path/to/audio.wav`; `.jsonl` records use `{"source": "/path/to/audio.wav", "key": "utterance_id"}`. `.json` is not parsed as an arbitrary JSON array by this iterator. Do not expose unrestricted paths or URLs directly to untrusted callers.
 

@@ -276,8 +276,13 @@ footer a{color:#60a5fa}
 <div class="card">
 <div class="card-title"><a href="https://github.com/BerriAI/litellm">LiteLLM</a></div>
 <div class="card-stars">54.3K stars</div>
-<div class="card-desc">OpenAI 兼容 AI Gateway。FunASR / SenseVoice 可通过 <code>custom_openai</code> 作为自托管语音转写端点接入。</div>
+<div class="card-desc">OpenAI 兼容 AI Gateway。使用 <code>openai/sensevoice</code>，并显式设置 <code>api_base: http://127.0.0.1:8000/v1</code>，可接入同机自托管的 FunASR 转写服务。<code>sensevoice</code> 是服务模型别名，不是 checkpoint 仓库 ID；容器部署需使用容器内可访问的服务地址。<a href="https://github.com/BerriAI/litellm-docs/pull/610">配置文档 PR</a> 尚待上游合并。</div>
 <div><span class="card-tag">AI Gateway</span><span class="card-tag">OpenAI 兼容</span></div>
+</div>
+<div class="card">
+<div class="card-title"><a href="https://github.com/huggingface/speech-to-speech">speech-to-speech</a></div>
+<div class="card-desc">Hugging Face 语音 Agent 流水线已通过 <a href="https://github.com/huggingface/speech-to-speech/pull/319">#319</a> 合入原生 SenseVoiceSmall / FunASR 后端。v1.0.0 尚未包含；使用<a href="/docs/community.html#speech-to-speech">固定源码安装指南</a>，并单独配置 LLM 与 TTS。</div>
+<div><span class="card-tag">语音 Agent</span><span class="card-tag">源码集成</span></div>
 </div>
 <div class="card">
 <div class="card-title"><a href="https://github.com/pipecat-ai/pipecat">Pipecat</a></div>

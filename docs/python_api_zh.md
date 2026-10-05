@@ -53,7 +53,7 @@
 
 ### 为子模型分别指定设备
 
-> **版本要求：** PyPI 的 1.4.15 发行包尚不包含此设备配置契约。请使用包含 [PR #3706](https://github.com/modelscope/FunASR/pull/3706) 的源码版本（合并提交为 [4d8e087](https://github.com/modelscope/FunASR/commit/4d8e08748c9d7cc10f3e3a01f5f4b927a8948699)），并按照[源码安装说明](installation/installation_zh.md)操作。记录工作区 commit 和实际导入的 `funasr.__file__`；开发版工作区仍可能显示版本号 `1.4.15`。
+> **版本要求：** [PyPI 1.4.16](https://pypi.org/project/funasr/1.4.16/) 已包含此设备配置契约，1.4.15 尚不包含。使用 `python -m pip install "funasr==1.4.16"` 安装已核验的发行版；依赖配置见[安装指南](installation/installation_zh.md)。如从源码安装，请使用包含 [PR #3706](https://github.com/modelscope/FunASR/pull/3706) 的版本（合并提交为 [4d8e087](https://github.com/modelscope/FunASR/commit/4d8e08748c9d7cc10f3e3a01f5f4b927a8948699)）。记录安装版本和实际导入的 `funasr.__file__`，源码安装还应记录 commit；仅凭源码版本号不能确定其包含哪些修复。
 
 例如，在 Apple Silicon 上让 ASR 使用 MPS，而 FSMN VAD 和标点使用 CPU：
 
@@ -103,7 +103,15 @@ for result in results:
 
 `batch_size=1` 在直接推理路径中逐条处理列表；只有确认模型支持批量并测量过内存占用后再增大它。`batch_size_s` 的含义不同，只控制包装层的 VAD 路径。VAD 切分不是麦克风增量流式识别，也不保证无限录音长度或固定的总内存占用。
 
-波形应为采样率已知的一维单声道 float32 数组。使用通用音频加载器的模型，在 `generate()` 中通过 `fs` 指定数组的原始采样率，回退值为 16000；目标采样率由模型前端决定。不要把立体声矩阵或数字列表默认当作单条波形，Python 列表通常被解释为多条输入。文件解码能力取决于已安装的音频后端。顶层 bytes 由 `load_bytes` 处理：识别出的容器格式会被解码并重采样为 16 kHz，否则按没有采样率元数据的 int16 PCM 解释。输入格式有歧义时，优先使用解码后的数组并明确采样率。参见[音频加载代码](../funasr/utils/load_utils.py) 和 [bytes 输入测试](../tests/test_load_audio_bytes.py)。
+波形应为采样率已知的一维单声道 float32 数组。使用通用音频加载器的模型，在 `generate()` 中通过 `fs` 指定数组的原始采样率，回退值为 16000；目标采样率由模型前端决定。不要把立体声矩阵或数字列表默认当作单条波形，Python 列表通常被解释为多条输入。文件解码能力取决于已安装的音频后端。默认 `input_format="auto"` 时，顶层 bytes 由 `load_bytes` 处理：识别出的容器格式会被解码并重采样为 16 kHz，否则按没有采样率元数据的 int16 PCM 解释。输入格式有歧义时，优先使用解码后的数组并明确采样率。参见[音频加载代码](../funasr/utils/load_utils.py) 和 [bytes 输入测试](../tests/test_load_audio_bytes.py)。
+
+对于格式已知的**单声道、有符号 16 位、小端原始 PCM**，可以显式跳过格式探测：
+
+```python
+result = model.generate(input=pcm_bytes, input_format="pcm_s16le", fs=16000)
+```
+
+该选项也适用于批量输入中的 bytes 和 VAD 预处理路径。它直接把采样值归一化为 float32，不调用容器解码器，避免原始字节偶然匹配文件头。字节转换本身不做重采样，请通过 `fs` 传入真实原始采样率。不要用于 WAV/MP3 文件字节、浮点 PCM、其他位深、大端数据或交错排列的立体声。若字节数不足以组成完整的双字节采样点，会抛出 `ValueError`，收包层应先拼接完整采样。流式调用仍须保留每会话的 `cache`、分块配置和末帧处理。这个显式入口避免了探测歧义，但不代表已经定位所有推理卡顿的原因。
 
 `prepare_data_iterator` 也接受清单文件。`.scp` 的一行可以是 `utterance_id /path/to/audio.wav`；`.jsonl` 使用 `{"source": "/path/to/audio.wav", "key": "utterance_id"}`。该迭代器不会把 `.json` 文件当作任意 JSON 数组解析。不要向不可信调用方直接开放任意路径或 URL 输入。
 
